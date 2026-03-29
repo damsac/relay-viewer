@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]
-name = "relay_viewer"
+name = "relay_viewer_ffi"
 
 [dependencies]
 relay-viewer-core = { path = "../core" }

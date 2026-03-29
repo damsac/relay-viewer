@@ -58,11 +58,22 @@ echo "=== Generating Swift bindings ==="
 BINDINGS_DIR="$OUTPUT_DIR/Bindings"
 mkdir -p "$BINDINGS_DIR"
 
-# On macOS the host lib is a .dylib; on Linux (CI cross-compile) it would be .so
-HOST_LIB="target/$PROFILE_DIR/lib${LIB_NAME}.dylib"
-if [ ! -f "$HOST_LIB" ]; then
-  HOST_LIB="target/$PROFILE_DIR/lib${LIB_NAME}.so"
+# Discover the host library — try .dylib (macOS), .so (Linux), .a (static)
+HOST_LIB=""
+for ext in dylib so a; do
+  candidate="target/$PROFILE_DIR/lib${LIB_NAME}.$ext"
+  if [ -f "$candidate" ]; then
+    HOST_LIB="$candidate"
+    break
+  fi
+done
+if [ -z "$HOST_LIB" ]; then
+  echo "ERROR: Could not find host library for $LIB_NAME in target/$PROFILE_DIR/" >&2
+  echo "Looked for: .dylib, .so, .a" >&2
+  ls -la "target/$PROFILE_DIR/"lib${LIB_NAME}.* 2>/dev/null || echo "  (no matching files)" >&2
+  exit 1
 fi
+echo "  Using host library: $HOST_LIB"
 
 cargo run -p uniffi-bindgen generate \
   --library "$HOST_LIB" \
