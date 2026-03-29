@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# RMP Android Build Script
+# Cross-compiles an FFI crate for Android via cargo-ndk, generates Kotlin bindings.
+# Usage: ./scripts/android-build --crate-name <crate> [--output-dir <dir>] [--release]
+
+CRATE_NAME=""
+OUTPUT_DIR="android"
+PROFILE=""
+PROFILE_DIR="debug"
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --crate-name) CRATE_NAME="$2"; shift 2 ;;
+    --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
+    --release) PROFILE="--release"; PROFILE_DIR="release"; shift ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
+  esac
+done
+
+if [ -z "$CRATE_NAME" ]; then
+  echo "Error: --crate-name is required"
+  echo "Usage: ./scripts/android-build --crate-name <crate> [--output-dir <dir>] [--release]"
+  exit 1
+fi
+
+LIB_NAME="${CRATE_NAME//-/_}"
+JNILIBS_DIR="$OUTPUT_DIR/app/src/main/jniLibs"
+
+ANDROID_TARGETS=("arm64-v8a" "armeabi-v7a" "x86_64")
+
+echo "=== Cross-compiling $CRATE_NAME for Android ==="
+cargo ndk \
+  -t arm64-v8a \
+  -t armeabi-v7a \
+  -t x86_64 \
+  build -p "$CRATE_NAME" $PROFILE
+
+echo "=== Copying shared libraries ==="
+declare -A ARCH_MAP=(
+  ["arm64-v8a"]="aarch64-linux-android"
+  ["armeabi-v7a"]="armv7-linux-androideabi"
+  ["x86_64"]="x86_64-linux-android"
+)
+
+for abi in "${ANDROID_TARGETS[@]}"; do
+  rust_target="${ARCH_MAP[$abi]}"
+  mkdir -p "$JNILIBS_DIR/$abi"
+  cp "target/$rust_target/$PROFILE_DIR/lib${LIB_NAME}.so" "$JNILIBS_DIR/$abi/"
+  echo "  $abi: lib${LIB_NAME}.so"
+done
+
+echo "=== Generating Kotlin bindings ==="
+cargo build -p "$CRATE_NAME" $PROFILE
+
+KOTLIN_DIR="$OUTPUT_DIR/app/src/main/java"
+cargo run -p uniffi-bindgen generate \
+  --library "target/$PROFILE_DIR/lib${LIB_NAME}.so" \
+  --language kotlin \
+  --out-dir "$KOTLIN_DIR"
+
+echo "=== Done ==="
+echo "JNI libs: $JNILIBS_DIR/"
+echo "Kotlin bindings: $KOTLIN_DIR/"

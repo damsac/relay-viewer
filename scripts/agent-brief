@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "# Agent Brief — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo ""
+
+echo "## Available Commands"
+if command -v just &>/dev/null && [ -f justfile ]; then
+  just --list 2>/dev/null
+else
+  echo "(no justfile found or just not installed)"
+fi
+echo ""
+
+echo "## Docs Index"
+if [ -d docs ]; then
+  for f in docs/*.md; do
+    [ -f "$f" ] || continue
+    summary=$(head -10 "$f" | grep "^summary:" | sed 's/^summary: //' || true)
+    echo "- **$f**${summary:+: $summary}"
+    head -20 "$f" | grep -A10 "^read_when:" | grep "  - " | sed 's/^  - /  Read when: /' || true
+  done
+else
+  echo "(no docs/ directory)"
+fi
+echo ""
+
+echo "## Environment"
+rustc --version 2>/dev/null || echo "rustc: not found"
+echo "Targets: $(rustup target list --installed 2>/dev/null | tr '\n' ' ' || echo 'unknown')"
+[ -n "${ANDROID_HOME:-}" ] && echo "Android SDK: $ANDROID_HOME" || echo "Android SDK: not set"
+command -v xcodegen &>/dev/null && echo "XcodeGen: $(xcodegen --version 2>/dev/null)" || echo "XcodeGen: not found"
+command -v cargo-ndk &>/dev/null && echo "cargo-ndk: available" || echo "cargo-ndk: not found"
+echo ""
+
+echo "## Invariants"
+if [ -f invariants/invariants.toml ]; then
+  grep 'statement = ' invariants/invariants.toml | sed 's/^statement = "/- /' | sed 's/"$//'
+else
+  echo "(no invariants file)"
+fi

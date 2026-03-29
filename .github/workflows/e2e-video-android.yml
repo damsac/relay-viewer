@@ -1,0 +1,168 @@
+name: E2E Video Android
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "android/**"
+  workflow_dispatch:
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  e2e-video-android:
+    runs-on: ubuntu-latest
+    env:
+      FFI_CRATE: relay-viewer-ffi  # Change this to your FFI crate name
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install emulator and system image
+        run: |
+          sdkmanager --install "emulator" "system-images;android-35;google_apis;x86_64" "platform-tools"
+
+      - name: Create and start emulator
+        run: |
+          echo "no" | avdmanager create avd -n e2e -k "system-images;android-35;google_apis;x86_64" --force
+          $ANDROID_HOME/emulator/emulator -avd e2e -no-window -no-audio -gpu swiftshader_indirect -no-boot-anim &
+          echo "Waiting for emulator to boot..."
+          adb wait-for-device
+          # Wait for boot completion
+          for i in $(seq 1 120); do
+            BOOT=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            if [ "$BOOT" = "1" ]; then
+              echo "Emulator booted after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          # Dismiss any setup wizards
+          adb shell input keyevent 82
+          sleep 2
+
+      - name: Build Android (cross-compile + bindings)
+        run: ./scripts/android-build --crate-name $FFI_CRATE
+
+      - name: Build and install APK
+        run: |
+          cd android
+          ./gradlew assembleDebug
+          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          if [ -z "$APK" ]; then
+            echo "::error::No APK found"
+            exit 1
+          fi
+          adb install "$APK"
+
+      - name: Launch app
+        run: |
+          adb shell am start -n dev.damsac.relay_viewer/.MainActivity 2>/dev/null || \
+          adb shell monkey -p dev.damsac.relay_viewer -c android.intent.category.LAUNCHER 1
+
+      - name: Wait for app to render
+        run: sleep 2
+
+      - name: Start screen recording
+        run: |
+          # screenrecord has a 3-minute max; start it in the background
+          adb shell screenrecord --bit-rate 3000000 /sdcard/recording.mp4 &
+          echo $! > recorder.pid
+          sleep 2  # let recorder initialise
+
+      - name: Record app in action
+        run: sleep 8
+
+      - name: Stop screen recording and pull video
+        if: always()
+        run: |
+          # Stop the recording via pkill on the device
+          adb shell pkill -INT screenrecord 2>/dev/null || true
+          # Wait for the recorder to flush
+          sleep 3
+          # Also kill the local adb shell process
+          if [ -f recorder.pid ]; then
+            kill "$(cat recorder.pid)" 2>/dev/null || true
+          fi
+          adb pull /sdcard/recording.mp4 recording.mp4 2>/dev/null || true
+
+      - name: Upload video to Blossom
+        id: blossom
+        if: always()
+        run: |
+          if [ ! -f recording.mp4 ]; then
+            echo "::warning::No recording found"
+            echo "url=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          URL=$(cargo run -p blossom-upload -- \
+            --server https://blossom.primal.net \
+            --server https://blossom.oxtr.dev \
+            recording.mp4 2>/dev/null || echo "")
+          if [ -z "$URL" ]; then
+            echo "::warning::Blossom upload failed, uploading as artifact instead"
+            echo "url=" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=$URL" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload video as artifact (fallback)
+        if: always() && steps.blossom.outputs.url == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-video-android
+          path: recording.mp4
+          retention-days: 5
+          if-no-files-found: ignore
+
+      - name: Post PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = '${{ steps.blossom.outputs.url }}';
+            const runner = '${{ runner.os }} ${{ runner.arch }}';
+            const sha = '${{ github.event.pull_request.head.sha }}';
+            const shortSha = sha.substring(0, 7);
+
+            let videoLine;
+            if (url) {
+              videoLine = `[Watch the recording](${url})`;
+            } else {
+              videoLine = '_Recording uploaded as workflow artifact (Blossom upload failed)_';
+            }
+
+            const body = [
+              '## E2E Video — Android',
+              '',
+              videoLine,
+              '',
+              `Recorded on: ${runner}`,
+              `Commit: ${shortSha}`,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });

@@ -1,0 +1,7 @@
+[bindings.kotlin]
+package_name = "dev.damsac.relay_viewer.rust"
+cdylib_name = "relay_viewer"
+
+[bindings.swift]
+module_name = "RelayViewerCore"
+cdylib_name = "relay_viewer"

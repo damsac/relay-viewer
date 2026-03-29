@@ -1,0 +1,38 @@
+# Architecture rules for RMP apps.
+# Machine-checkable via `rmp check-invariants` (Phase 2).
+# For now, these are the constitutional articles — agents and reviewers enforce them manually.
+
+[[invariant]]
+id = "RMP-001"
+kind = "must"
+statement = "All business logic lives in crates/core/. No platform-specific code in core."
+scope = ["crates/core/**"]
+hint = "Check for any iOS/Android/platform imports or conditional compilation"
+
+[[invariant]]
+id = "RMP-002"
+kind = "must"
+statement = "Native layers (iOS/Android) are thin UI shells. They render state from Rust and dispatch actions back. No business logic in Swift/Kotlin."
+scope = ["ios/**/*.swift", "android/**/*.kt"]
+hint = "Look for logic that should be in the Rust core — data transforms, validation, state management"
+
+[[invariant]]
+id = "RMP-003"
+kind = "must"
+statement = "State flows unidirectionally: Native dispatches Action → Rust processes → Rust returns State → Native renders"
+scope = ["crates/core/src/**", "ios/**/*.swift", "android/**/*.kt"]
+hint = "Check for bidirectional state mutation or native-side state that bypasses Rust"
+
+[[invariant]]
+id = "RMP-004"
+kind = "must"
+statement = "UniFFI bindings are generated, not hand-written. The ffi crate re-exports core types via Ffi* wrappers."
+scope = ["crates/ffi/**"]
+hint = "Check for manual FFI code or hand-written C bindings"
+
+[[invariant]]
+id = "RMP-005"
+kind = "must"
+statement = "Tests live alongside the code they test. Core logic tests in crates/core/. Swift tests in ios/Tests/. Kotlin tests in android/."
+scope = ["**/*test*", "**/*Test*"]
+hint = "Check for misplaced test files"
