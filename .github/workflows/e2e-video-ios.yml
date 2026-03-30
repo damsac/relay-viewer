@@ -82,18 +82,13 @@ jobs:
           echo $! > recorder.pid
           sleep 2  # let recorder initialise
 
-      - name: Record app in action (scroll through list)
+      - name: Record app in action
         run: |
-          sleep 3  # let content load
-          # Swipe up to scroll down (bottom-to-top gesture)
-          xcrun simctl io booted input swipe 200 600 200 200 0.5
-          sleep 1
-          xcrun simctl io booted input swipe 200 600 200 200 0.5
-          sleep 1
-          xcrun simctl io booted input swipe 200 600 200 200 0.5
-          sleep 1
-          xcrun simctl io booted input swipe 200 600 200 200 0.5
-          sleep 2  # hold on final position
+          # iOS Simulator doesn't support input simulation via simctl
+          # (simctl io only handles recordVideo/screenshot, not touch events).
+          # Instead, let the app load and display content for 15 seconds —
+          # the relay viewer auto-fetches events, so this captures real activity.
+          sleep 15
 
       - name: Stop screen recording
         if: always()
