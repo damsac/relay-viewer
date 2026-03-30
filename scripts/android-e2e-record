@@ -19,23 +19,25 @@ APK="$APK_DIR/app-debug.apk"
 echo "Installing $APK"
 adb install "$APK"
 
-# --- Launch app ---
+# --- Launch app and wait for content to load ---
 adb shell am start -n dev.damsac.relay_viewer/.MainActivity 2>/dev/null || \
   adb shell monkey -p dev.damsac.relay_viewer -c android.intent.category.LAUNCHER 1
-sleep 3
+echo "=== Waiting 12s for app to connect to relay and render content ==="
+sleep 12
 
-# --- Record screen (15s max, background) ---
-adb shell screenrecord --bit-rate 3000000 --time-limit 15 /sdcard/recording.mp4 &
+# --- Record screen (30s max, background) ---
+# Recording starts AFTER content has loaded so the video shows the real app
+adb shell screenrecord --bit-rate 3000000 --time-limit 30 /sdcard/recording.mp4 &
 RECORDER_PID=$!
 sleep 2
 
-# --- Scroll gestures ---
+# --- Scroll gestures (content should already be visible) ---
 adb shell input swipe 500 1500 500 500 500
-sleep 1
+sleep 2
 adb shell input swipe 500 1500 500 500 500
-sleep 1
+sleep 2
 adb shell input swipe 500 1500 500 500 500
-sleep 1
+sleep 2
 adb shell input swipe 500 1500 500 500 500
 sleep 3
 
