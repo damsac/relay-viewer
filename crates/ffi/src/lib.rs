@@ -66,12 +66,12 @@ pub struct AppCore {
 
 #[uniffi::export]
 impl AppCore {
-    /// Create a new AppCore connected to the given relay URL.
+    /// Create a new AppCore. Instant — does NOT connect to relays.
+    /// Connection happens lazily on the first `fetch_events` call.
     #[uniffi::constructor]
     pub fn new(relay_url: String, data_dir: String) -> Result<Self, FfiError> {
         let rt = Runtime::new().map_err(|e| FfiError::Internal(e.to_string()))?;
-        let client = rt
-            .block_on(RelayClient::new(&relay_url, &data_dir))
+        let client = RelayClient::new(&[relay_url.as_str()], &data_dir)
             .map_err(FfiError::from)?;
         Ok(Self {
             client: Mutex::new(client),
@@ -80,8 +80,9 @@ impl AppCore {
     }
 
     /// Fetch latest events of all kinds from the relay.
+    /// Triggers lazy relay connection on first call.
     pub fn fetch_events(&self, limit: u16) -> Result<Vec<FfiRelayEvent>, FfiError> {
-        let client = self.client.lock().unwrap();
+        let mut client = self.client.lock().unwrap();
         let events = self
             .rt
             .block_on(client.fetch_events(limit))
