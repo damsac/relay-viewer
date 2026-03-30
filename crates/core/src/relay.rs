@@ -9,6 +9,8 @@ use crate::store::Store;
 pub struct RelayClient {
     client: Client,
     store: Store,
+    connected: bool,
+    relay_urls: Vec<String>,
 }
 
 fn event_to_relay_event(event: &Event, display_name: &str) -> RelayEvent {
@@ -25,17 +27,40 @@ fn event_to_relay_event(event: &Event, display_name: &str) -> RelayEvent {
 }
 
 impl RelayClient {
-    /// Create a new relay client connected to our damsac relay.
-    pub async fn new(relay_url: &str, data_dir: &str) -> Result<Self, Error> {
+    /// Create a new relay client. Does NOT connect to relays — connection
+    /// happens lazily on the first fetch call so that construction is instant.
+    pub fn new(relay_urls: &[&str], data_dir: &str) -> Result<Self, Error> {
         let store = Store::new(data_dir)?;
         let client = Client::default();
+        Ok(Self {
+            client,
+            store,
+            connected: false,
+            relay_urls: relay_urls.iter().map(|s| s.to_string()).collect(),
+        })
+    }
 
-        if let Err(e) = client.add_relay(relay_url).await {
-            log::warn!("failed to add relay {}: {}", relay_url, e);
+    /// Connect to relays if not already connected.
+    async fn ensure_connected(&mut self) -> Result<(), Error> {
+        if self.connected {
+            return Ok(());
         }
-
-        client.connect().await;
-        Ok(Self { client, store })
+        for url in &self.relay_urls {
+            if let Err(e) = self.client.add_relay(url.as_str()).await {
+                log::warn!("failed to add relay {}: {}", url, e);
+            }
+        }
+        // Add well-known default relays for metadata resolution.
+        for url in [
+            "wss://relay.damus.io",
+            "wss://nos.lol",
+            "wss://relay.nostr.band",
+        ] {
+            self.client.add_relay(url).await.ok();
+        }
+        self.client.connect().await;
+        self.connected = true;
+        Ok(())
     }
 
     /// Resolve display names for a set of pubkeys by fetching kind 0 metadata.
@@ -87,7 +112,9 @@ impl RelayClient {
     }
 
     /// Fetch recent events of ALL kinds from the relay.
-    pub async fn fetch_events(&self, limit: u16) -> Result<Vec<RelayEvent>, Error> {
+    /// Connects lazily on first call.
+    pub async fn fetch_events(&mut self, limit: u16) -> Result<Vec<RelayEvent>, Error> {
+        self.ensure_connected().await?;
         // No kind filter — fetch all event kinds
         let filter = Filter::new().limit(limit as usize);
 

@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# android-e2e-record — Build, install, and record instrumentation test on emulator
+# Designed to run inside reactivecircus/android-emulator-runner with an
+# already-booted emulator. Uses Compose UI tests (like iOS XCUITest) instead
+# of uiautomator scraping + fixed delays.
+set -euo pipefail
+
+# --- Build APKs (app + test) ---
+echo "=== Building app and test APKs ==="
+cd android && ./gradlew assembleDebug assembleDebugAndroidTest && cd ..
+
+# --- Verify APKs ---
+APK_DIR="android/app/build/outputs/apk/debug"
+TEST_APK_DIR="android/app/build/outputs/apk/androidTest/debug"
+
+APK="$APK_DIR/app-debug.apk"
+TEST_APK="$TEST_APK_DIR/app-debug-androidTest.apk"
+
+[ -f "$APK" ] || { echo "::error::App APK not found at $APK"; exit 1; }
+[ -f "$TEST_APK" ] || { echo "::error::Test APK not found at $TEST_APK"; exit 1; }
+
+echo "=== Installing APKs ==="
+adb install "$APK"
+adb install "$TEST_APK"
+
+# --- Start screen recording (background, 60s max) ---
+echo "=== Starting screen recording ==="
+adb shell screenrecord --bit-rate 3000000 --time-limit 60 /sdcard/recording.mp4 &
+RECORDER_PID=$!
+sleep 2  # Let recorder initialise
+
+# --- Run instrumentation test ---
+echo "=== Running instrumentation test ==="
+adb shell am instrument -w \
+  -e class dev.damsac.relay_viewer.RelayViewerE2eTest#scrollThroughEvents \
+  dev.damsac.relay_viewer.test/androidx.test.runner.AndroidJUnitRunner || true
+
+# --- Stop recording ---
+echo "=== Stopping recording ==="
+adb shell pkill -INT screenrecord 2>/dev/null || true
+wait $RECORDER_PID 2>/dev/null || true
+sleep 2
+
+# --- Pull video ---
+adb pull /sdcard/recording.mp4 recording.mp4
+echo "=== Recording saved to recording.mp4 ==="

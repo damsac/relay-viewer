@@ -51,12 +51,30 @@ for abi in "${ANDROID_TARGETS[@]}"; do
   echo "  $abi: lib${LIB_NAME}.so"
 done
 
-echo "=== Generating Kotlin bindings ==="
+echo "=== Building host library for UniFFI metadata ==="
 cargo build -p "$CRATE_NAME" $PROFILE
 
+# Discover the host library — try .so (Linux), .dylib (macOS), .a (static)
+HOST_LIB=""
+for ext in so dylib a; do
+  candidate="target/$PROFILE_DIR/lib${LIB_NAME}.$ext"
+  if [ -f "$candidate" ]; then
+    HOST_LIB="$candidate"
+    break
+  fi
+done
+if [ -z "$HOST_LIB" ]; then
+  echo "ERROR: Could not find host library for $LIB_NAME in target/$PROFILE_DIR/" >&2
+  echo "Looked for: .so, .dylib, .a" >&2
+  ls -la "target/$PROFILE_DIR/"lib${LIB_NAME}.* 2>/dev/null || echo "  (no matching files)" >&2
+  exit 1
+fi
+echo "  Using host library: $HOST_LIB"
+
+echo "=== Generating Kotlin bindings ==="
 KOTLIN_DIR="$OUTPUT_DIR/app/src/main/java"
 cargo run -p uniffi-bindgen generate \
-  --library "target/$PROFILE_DIR/lib${LIB_NAME}.so" \
+  --library "$HOST_LIB" \
   --language kotlin \
   --out-dir "$KOTLIN_DIR"
 

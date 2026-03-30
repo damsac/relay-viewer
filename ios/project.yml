@@ -41,3 +41,25 @@ targets:
         BUNDLE_LOADER: "$(TEST_HOST)"
     dependencies:
       - target: "RelayViewer"
+  "RelayViewerUITests":
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: "RelayViewer"
+
+schemes:
+  RelayViewer:
+    build:
+      targets:
+        RelayViewer: all
+    test:
+      targets:
+        - name: RelayViewerTests
+          randomExecutionOrder: true
+        - name: RelayViewerUITests
+          randomExecutionOrder: true
