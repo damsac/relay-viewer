@@ -16,7 +16,7 @@ jobs:
   e2e-video-android:
     runs-on: ubuntu-latest
     env:
-      FFI_CRATE: relay-viewer-ffi  # Change this to your FFI crate name
+      FFI_CRATE: relay-viewer-ffi
     steps:
       - uses: actions/checkout@v4
 
@@ -37,83 +37,65 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install emulator and system image
-        run: |
-          sdkmanager --install "emulator" "system-images;android-35;google_apis;x86_64" "platform-tools"
-
-      - name: Create and start emulator
-        run: |
-          echo "no" | avdmanager create avd -n e2e -k "system-images;android-35;google_apis;x86_64" --force
-          $ANDROID_HOME/emulator/emulator -avd e2e -no-window -no-audio -gpu swiftshader_indirect -no-boot-anim &
-          echo "Waiting for emulator to boot..."
-          adb wait-for-device
-          # Wait for boot completion
-          for i in $(seq 1 120); do
-            BOOT=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
-            if [ "$BOOT" = "1" ]; then
-              echo "Emulator booted after ${i}s"
-              break
-            fi
-            sleep 1
-          done
-          # Dismiss any setup wizards
-          adb shell input keyevent 82
-          sleep 2
-
       - name: Build Android (cross-compile + bindings)
         run: ./scripts/android-build --crate-name $FFI_CRATE
 
-      - name: Build and install APK
-        run: |
-          cd android
-          ./gradlew assembleDebug
-          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
-          if [ -z "$APK" ]; then
-            echo "::error::No APK found"
-            exit 1
-          fi
-          adb install "$APK"
+      - name: Build APK
+        run: cd android && ./gradlew assembleDebug
 
-      - name: Launch app
+      - name: Enable KVM
         run: |
-          adb shell am start -n dev.damsac.relay_viewer/.MainActivity 2>/dev/null || \
-          adb shell monkey -p dev.damsac.relay_viewer -c android.intent.category.LAUNCHER 1
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
 
-      - name: Wait for app to render
-        run: sleep 2
+      - name: Record app in emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -no-audio -gpu swiftshader_indirect -no-boot-anim -no-snapshot
+          disable-animations: true
+          script: |
+            set -e
 
-      - name: Start screen recording
-        run: |
-          # screenrecord has a 3-minute max; start it in the background
-          adb shell screenrecord --bit-rate 3000000 /sdcard/recording.mp4 &
-          echo $! > recorder.pid
-          sleep 2  # let recorder initialise
+            # Find and install APK
+            APK=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -1)
+            if [ -z "$APK" ]; then
+              echo "::error::No APK found"
+              exit 1
+            fi
+            echo "Installing $APK"
+            adb install "$APK"
 
-      - name: Record app in action (scroll through list)
-        run: |
-          sleep 3  # let content load
-          # Swipe up to scroll down (bottom-to-top gesture)
-          adb shell input swipe 500 1500 500 500 500
-          sleep 1
-          adb shell input swipe 500 1500 500 500 500
-          sleep 1
-          adb shell input swipe 500 1500 500 500 500
-          sleep 1
-          adb shell input swipe 500 1500 500 500 500
-          sleep 2  # hold on final position
+            # Launch app
+            adb shell am start -n dev.damsac.relay_viewer/.MainActivity 2>/dev/null || \
+              adb shell monkey -p dev.damsac.relay_viewer -c android.intent.category.LAUNCHER 1
+            sleep 3
 
-      - name: Stop screen recording and pull video
-        if: always()
-        run: |
-          # Stop the recording via pkill on the device
-          adb shell pkill -INT screenrecord 2>/dev/null || true
-          # Wait for the recorder to flush
-          sleep 3
-          # Also kill the local adb shell process
-          if [ -f recorder.pid ]; then
-            kill "$(cat recorder.pid)" 2>/dev/null || true
-          fi
-          adb pull /sdcard/recording.mp4 recording.mp4 2>/dev/null || true
+            # Start recording (15s max, background)
+            adb shell screenrecord --bit-rate 3000000 --time-limit 15 /sdcard/recording.mp4 &
+            RECORDER_PID=$!
+            sleep 2
+
+            # Scroll gestures
+            adb shell input swipe 500 1500 500 500 500
+            sleep 1
+            adb shell input swipe 500 1500 500 500 500
+            sleep 1
+            adb shell input swipe 500 1500 500 500 500
+            sleep 1
+            adb shell input swipe 500 1500 500 500 500
+            sleep 3
+
+            # Stop recording
+            adb shell pkill -INT screenrecord 2>/dev/null || true
+            wait $RECORDER_PID 2>/dev/null || true
+            sleep 2
+
+            # Pull video
+            adb pull /sdcard/recording.mp4 recording.mp4
 
       - name: Upload video to Blossom
         id: blossom
