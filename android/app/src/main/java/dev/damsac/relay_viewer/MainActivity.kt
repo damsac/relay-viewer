@@ -13,6 +13,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -100,10 +101,13 @@ fun EventListScreen(dataDir: String) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .then(if (isLoading) Modifier.testTag("loading") else Modifier)
         ) {
             if (error != null && events.isEmpty()) {
                 Column(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("error"),
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -115,7 +119,7 @@ fun EventListScreen(dataDir: String) {
                     Button(onClick = { refresh() }) { Text("Retry") }
                 }
             } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(modifier = Modifier.fillMaxSize().testTag("event_list")) {
                     items(events, key = { it.id }) { event ->
                         EventCard(event)
                     }
@@ -131,6 +135,7 @@ fun EventCard(event: FfiRelayEvent) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp)
+            .testTag("event_card")
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(

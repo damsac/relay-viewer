@@ -1,57 +1,42 @@
 #!/usr/bin/env bash
-# android-e2e-record — Build, install, launch, and screen-record the Android app
+# android-e2e-record — Build, install, and record instrumentation test on emulator
 # Designed to run inside reactivecircus/android-emulator-runner with an
-# already-booted emulator. Must execute as a SINGLE shell process so that
-# variables and background PIDs persist across the entire script.
+# already-booted emulator. Uses Compose UI tests (like iOS XCUITest) instead
+# of uiautomator scraping + fixed delays.
 set -euo pipefail
 
-# --- Build APK ---
-echo "=== Building APK ==="
-cd android && ./gradlew assembleDebug && cd ..
+# --- Build APKs (app + test) ---
+echo "=== Building app and test APKs ==="
+cd android && ./gradlew assembleDebug assembleDebugAndroidTest && cd ..
 
-# --- Verify APK ---
+# --- Verify APKs ---
 APK_DIR="android/app/build/outputs/apk/debug"
-echo "=== APK output directory ==="
-ls -la "$APK_DIR" || { echo "::error::APK output directory not found"; exit 1; }
+TEST_APK_DIR="android/app/build/outputs/apk/androidTest/debug"
 
 APK="$APK_DIR/app-debug.apk"
-[ -f "$APK" ] || { echo "::error::APK not found at $APK"; exit 1; }
-echo "Installing $APK"
+TEST_APK="$TEST_APK_DIR/app-debug-androidTest.apk"
+
+[ -f "$APK" ] || { echo "::error::App APK not found at $APK"; exit 1; }
+[ -f "$TEST_APK" ] || { echo "::error::Test APK not found at $TEST_APK"; exit 1; }
+
+echo "=== Installing APKs ==="
 adb install "$APK"
+adb install "$TEST_APK"
 
-# --- Launch app and wait for content to load ---
-adb shell am start -n dev.damsac.relay_viewer/.MainActivity 2>/dev/null || \
-  adb shell monkey -p dev.damsac.relay_viewer -c android.intent.category.LAUNCHER 1
-
-echo "=== Polling for app content readiness (up to 30s) ==="
-for i in $(seq 1 30); do
-  UI_DUMP=$(adb shell "uiautomator dump /dev/tty" 2>/dev/null || echo "")
-  if echo "$UI_DUMP" | grep -qE "ago|Text Note|Metadata|Reaction"; then
-    echo "Content loaded after ${i}s"
-    sleep 2  # Extra settle time for rendering
-    break
-  fi
-  [ "$i" -eq 30 ] && echo "::warning::Content not detected after 30s, recording anyway"
-  sleep 1
-done
-
-# --- Record screen (30s max, background) ---
-# Recording starts AFTER content has loaded so the video shows the real app
-adb shell screenrecord --bit-rate 3000000 --time-limit 30 /sdcard/recording.mp4 &
+# --- Start screen recording (background, 60s max) ---
+echo "=== Starting screen recording ==="
+adb shell screenrecord --bit-rate 3000000 --time-limit 60 /sdcard/recording.mp4 &
 RECORDER_PID=$!
-sleep 2
+sleep 2  # Let recorder initialise
 
-# --- Scroll gestures (content should already be visible) ---
-adb shell input swipe 500 1500 500 500 500
-sleep 2
-adb shell input swipe 500 1500 500 500 500
-sleep 2
-adb shell input swipe 500 1500 500 500 500
-sleep 2
-adb shell input swipe 500 1500 500 500 500
-sleep 3
+# --- Run instrumentation test ---
+echo "=== Running instrumentation test ==="
+adb shell am instrument -w \
+  -e class dev.damsac.relay_viewer.RelayViewerE2eTest#scrollThroughEvents \
+  dev.damsac.relay_viewer.test/androidx.test.runner.AndroidJUnitRunner || true
 
 # --- Stop recording ---
+echo "=== Stopping recording ==="
 adb shell pkill -INT screenrecord 2>/dev/null || true
 wait $RECORDER_PID 2>/dev/null || true
 sleep 2
