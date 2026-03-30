@@ -62,10 +62,7 @@ jobs:
 
             # Find and install APK
             APK=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -1)
-            if [ -z "$APK" ]; then
-              echo "::error::No APK found"
-              exit 1
-            fi
+            [ -n "$APK" ] || { echo "::error::No APK found"; exit 1; }
             echo "Installing $APK"
             adb install "$APK"
 
