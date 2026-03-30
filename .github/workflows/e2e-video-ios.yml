@@ -47,11 +47,11 @@ jobs:
       - name: Generate Xcode project
         run: cd ios && xcodegen generate
 
-      - name: Build for simulator
+      - name: Build app and UI tests
         run: |
           cd ios
           set -o pipefail
-          xcodebuild build \
+          xcodebuild build-for-testing \
             -project *.xcodeproj \
             -scheme RelayViewer \
             -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
@@ -60,21 +60,6 @@ jobs:
             ARCHS=arm64 \
             2>&1 | xcbeautify --is-ci
 
-      - name: Install app on simulator
-        run: |
-          APP_PATH=$(find ios/build -name "RelayViewer.app" -type d | head -1)
-          if [ -z "$APP_PATH" ]; then
-            echo "::error::Could not find built .app bundle"
-            exit 1
-          fi
-          xcrun simctl install ${{ steps.sim.outputs.udid }} "$APP_PATH"
-
-      - name: Launch app
-        run: xcrun simctl launch ${{ steps.sim.outputs.udid }} dev.damsac.RelayViewer
-
-      - name: Wait for app to render
-        run: sleep 2
-
       - name: Start screen recording
         run: |
           xcrun simctl io ${{ steps.sim.outputs.udid }} recordVideo \
@@ -82,13 +67,18 @@ jobs:
           echo $! > recorder.pid
           sleep 2  # let recorder initialise
 
-      - name: Record app in action
+      - name: Run UI test (launches app and scrolls)
         run: |
-          # iOS Simulator doesn't support input simulation via simctl
-          # (simctl io only handles recordVideo/screenshot, not touch events).
-          # Instead, let the app load and display content for 15 seconds —
-          # the relay viewer auto-fetches events, so this captures real activity.
-          sleep 15
+          cd ios
+          set -o pipefail
+          xcodebuild test-without-building \
+            -project *.xcodeproj \
+            -scheme RelayViewer \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath build \
+            -only-testing:RelayViewerUITests/RelayViewerUITests/testScrollThroughEvents \
+            2>&1 | xcbeautify --is-ci || true
+          sleep 2
 
       - name: Stop screen recording
         if: always()
