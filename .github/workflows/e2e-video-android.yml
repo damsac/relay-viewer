@@ -55,50 +55,7 @@ jobs:
           emulator-options: -no-window -no-audio -gpu swiftshader_indirect -no-boot-anim -no-snapshot
           disable-animations: true
           working-directory: ${{ github.workspace }}
-          script: |
-            set -e
-
-            # Build APK inside emulator step to guarantee working directory
-            echo "=== Building APK ==="
-            cd android && ./gradlew assembleDebug && cd ..
-
-            # Verify APK exists
-            APK_DIR="android/app/build/outputs/apk/debug"
-            echo "=== APK output directory ==="
-            ls -la "$APK_DIR" || { echo "::error::APK output directory not found"; exit 1; }
-
-            APK="$APK_DIR/app-debug.apk"
-            [ -f "$APK" ] || { echo "::error::APK not found at $APK"; exit 1; }
-            echo "Installing $APK"
-            adb install "$APK"
-
-            # Launch app
-            adb shell am start -n dev.damsac.relay_viewer/.MainActivity 2>/dev/null || \
-              adb shell monkey -p dev.damsac.relay_viewer -c android.intent.category.LAUNCHER 1
-            sleep 3
-
-            # Start recording (15s max, background)
-            adb shell screenrecord --bit-rate 3000000 --time-limit 15 /sdcard/recording.mp4 &
-            RECORDER_PID=$!
-            sleep 2
-
-            # Scroll gestures
-            adb shell input swipe 500 1500 500 500 500
-            sleep 1
-            adb shell input swipe 500 1500 500 500 500
-            sleep 1
-            adb shell input swipe 500 1500 500 500 500
-            sleep 1
-            adb shell input swipe 500 1500 500 500 500
-            sleep 3
-
-            # Stop recording
-            adb shell pkill -INT screenrecord 2>/dev/null || true
-            wait $RECORDER_PID 2>/dev/null || true
-            sleep 2
-
-            # Pull video
-            adb pull /sdcard/recording.mp4 recording.mp4
+          script: ./scripts/android-e2e-record
 
       - name: Upload video to Blossom
         id: blossom
